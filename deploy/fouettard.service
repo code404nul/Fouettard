@@ -11,7 +11,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 # Le bot tourne avec un utilisateur dédié, sans droits administrateur
-User=Big_brother
+User=fouettard
 WorkingDirectory=/opt/fouettard
 ExecStart=/opt/fouettard/.venv/bin/python -m fouettard
 # Relance automatique 10 s après un arrêt (plantage, coupure...)
@@ -22,4 +22,3 @@ Environment=PYTHONUNBUFFERED=1
 
 [Install]
 WantedBy=multi-user.target
-ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDRtUtffyrb3ZwIC9mxu7Zz7OGIlX3flTqY6R3yjazkQ perso@archibarbu.art
