@@ -1,0 +1,4 @@
+# Les scripts lancés sous Linux doivent garder des fins de ligne Unix (LF),
+# même si le dépôt est modifié depuis Windows.
+*.sh      text eol=lf
+*.service text eol=lf

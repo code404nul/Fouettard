@@ -1,0 +1,16 @@
+# Secrets : ne JAMAIS commiter le .env
+.env
+
+# Base de données locale du bot
+data/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# Éditeurs
+.vscode/
+.idea/

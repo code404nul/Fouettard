@@ -1,0 +1,16 @@
+# Dates clés de la SAE J3D.
+# "week_start" = le lundi de la semaine concernée (format AAAA-MM-JJ).
+# Le bot affiche le compte à rebours avec /deadlines.
+
+deadlines:
+  - name: Remise du CdST
+    week_start: 2026-12-07
+
+  - name: Soutenance 1
+    week_start: 2027-01-04
+
+  - name: Soutenance 2
+    week_start: 2027-03-29
+
+  - name: Soutenance finale
+    week_start: 2027-05-31

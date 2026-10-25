@@ -1,0 +1,25 @@
+# Service systemd : lance Fouettard au démarrage de la machine
+# et le relance automatiquement s'il s'arrête.
+# Installé par deploy/install.sh dans /etc/systemd/system/
+
+[Unit]
+Description=Fouettard - bot Discord de suivi GitLab
+# On attend que le réseau soit prêt avant de démarrer
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Le bot tourne avec un utilisateur dédié, sans droits administrateur
+User=Big_brother
+WorkingDirectory=/opt/fouettard
+ExecStart=/opt/fouettard/.venv/bin/python -m fouettard
+# Relance automatique 10 s après un arrêt (plantage, coupure...)
+Restart=always
+RestartSec=10
+# Affiche les logs immédiatement (visibles avec : journalctl -u fouettard)
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDRtUtffyrb3ZwIC9mxu7Zz7OGIlX3flTqY6R3yjazkQ perso@archibarbu.art

@@ -1,0 +1,25 @@
+# Réglages du bot, modifiables sans toucher au code.
+# Redémarrer le bot après une modification.
+# Toutes les heures sont en heure de Paris.
+
+# Heures auxquelles le bot vérifie s'il doit envoyer des alertes
+# (le bot vérifie aussi une fois à chaque démarrage)
+check_times: ["09:00", "18:00"]
+
+# Rappel si un membre n'a eu aucune activité GitLab depuis ce nombre de jours
+inactivity_days: 5
+
+# Une issue en retard est rappelée tous les X jours tant qu'elle reste ouverte
+overdue_repeat_days: 2
+
+# Rappel si une merge request attend une review depuis plus de X jours
+mr_review_days: 2
+
+# Rappels avant chaque date clé de la SAE (nombre de jours avant le lundi)
+key_date_reminders: [14, 7, 2]
+
+# Heure du récap hebdomadaire, envoyé le dimanche
+weekly_recap_time: "20:00"
+
+# /checklist : un fichier plus petit que ça (en octets) est considéré "quasi vide"
+checklist_min_size: 200
