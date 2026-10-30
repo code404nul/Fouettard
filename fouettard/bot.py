@@ -21,6 +21,7 @@ EXTENSIONS = [
     "fouettard.cogs.reports",
     "fouettard.cogs.alerts",
 ]
+OPTIONAL_EXTENSIONS = ["fouettard.planning.cog"]
 
 
 class FouettardBot(commands.Bot):
@@ -40,6 +41,12 @@ class FouettardBot(commands.Bot):
         """Appelé une fois au démarrage, avant la connexion à Discord."""
         for extension in EXTENSIONS:
             await self.load_extension(extension)
+        # Une panne d'un module facultatif ne doit jamais empêcher le suivi GitLab
+        for extension in OPTIONAL_EXTENSIONS:
+            try:
+                await self.load_extension(extension)
+            except Exception:
+                log.exception("Module facultatif %s non chargé", extension)
         # Toutes les erreurs des slash commands passent par on_command_error
         self.tree.on_error = self.on_command_error
 

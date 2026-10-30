@@ -1,0 +1,71 @@
+# Réglages du module « planning perso ». Redémarrer le bot après une modification.
+# Toutes les heures sont en heure de Paris. Les liens ICS sont dans le .env, jamais ici.
+
+brief_time: "07:00"
+evening_time: "21:00"
+
+# Plage où le bot peut placer du travail, et début de la « soirée »
+day_start: "08:00"
+day_end: "22:00"
+evening_start: "18:00"
+meals:
+  - ["12:30", "13:30"]
+  - ["19:30", "20:15"]
+
+zeus_refresh_minutes: 30
+outlook_refresh_minutes: 60
+
+# --- Club ---
+club_weekly_goal_hours: 5      # réduit en semaine chargée, x1,5 en semaine calme
+min_project_block_minutes: 60
+max_project_block_minutes: 120
+club_preferred_weekdays: [3]   # jeudi soir, en plus du week-end (0 = lundi)
+fixed_slots: []                # ex : - {weekday: 3, start: "18:00", end: "20:00"}
+protected_slots: []            # ex : - {weekday: 5, start: "09:00", end: "12:00"}
+
+# --- J3D ---
+j3d_weekly_floor_hours: 3      # temps minimal tant qu'une milestone est à venir
+j3d_default_issue_hours: 2     # si l'issue n'a pas d'estimation GitLab
+j3d_urgent_hours: 48           # seule urgence qui passe un jour off
+j3d_stale_days: 5
+
+# --- Révisions ---
+review_minutes: 15
+max_reviews_per_day: 4
+exam_boost_days: 14
+# Seules ces matières créent des révisions
+review_subjects: [Mathématiques, Physique, Algorithmique, Architecture, Electronique, Programmation, NTS]
+subject_aliases:
+  maths: Mathématiques
+probable_homework_subjects: [Mathématiques, Physique, Algorithmique, Programmation]
+
+# --- Zeus ---
+# Le flux du groupe F1-2 n'a aucun cours parallèle : rien à masquer pour l'instant.
+# Titres exacts à ne pas afficher, si un jour un cours ne te concerne pas :
+ignored_subjects: []
+# Les rattrapages ne bloquent pas l'agenda, sauf si tu passes à true
+rattrapages_block: false
+
+# --- Mails (IMAP, identifiants dans le .env) ---
+mail_refresh_minutes: 15
+mail_lookback_days: 7
+# Ces expéditeurs ne sont jamais du bruit, et eux seuls peuvent déclencher une alerte
+mail_school_domains: [epita.fr, ionis-it.com]
+mail_prof_senders: []          # adresses de profs hors de ces domaines
+mail_noise_domains: [linkedin.com, facebookmail.com, instagram.com, amazon.fr, amazon.com]
+mail_noise_keywords: [newsletter, "se désabonner", unsubscribe, promotion, "offre spéciale"]
+mail_action_keywords: ["à rendre", rendu, deadline, "date limite", "dernier délai", obligatoire,
+                       convocation, inscription, "à faire", "merci de", "veuillez", "répondre",
+                       partiel, examen, "à compléter", signature, "à signer"]
+mail_urgent_keywords: [urgent, urgence, annulé, annulée, annulation, "changement de salle",
+                       convocation, "cours déplacé", "aujourd'hui", "demain"]
+
+# --- AWAKE Challenge 2027 (dates du cahier des charges) ---
+awake_deadlines:
+  - {date: 2026-12-15, name: "Liste de matériel à envoyer (recommandé)"}
+  - {date: 2027-01-31, name: "Rapport 1 (2 p.)", report: true}
+  - {date: 2027-03-31, name: "Rapport 2 (2 p.)", report: true}
+  - {date: 2027-05-03, name: "Commander le kakémono (roll-up.com)"}
+  - {date: 2027-05-31, name: "Rapport 3 (5 p. minimum)", report: true}
+  - {date: 2027-06-01, name: "Soutenance Teams (1er-2 juin)"}
+  - {date: 2027-06-03, name: "Course"}

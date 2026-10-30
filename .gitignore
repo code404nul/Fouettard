@@ -14,3 +14,6 @@ venv/
 # Éditeurs
 .vscode/
 .idea/
+
+# Copies accidentelles du .env (scp sans ":")
+ubuntu@*

@@ -195,6 +195,10 @@ class GitLabClient:
         """Issues du projet. state : "all", "opened" ou "closed"."""
         return await self._get_all(f"{self.project_path}/issues", {"state": state})
 
+    async def get_milestones(self, state: str = "active") -> list[dict]:
+        """Milestones du projet. state : "active" ou "closed"."""
+        return await self._get_all(f"{self.project_path}/milestones", {"state": state})
+
     async def get_labels(self) -> list[dict]:
         """Labels du projet (avec leur priorité éventuelle)."""
         return await self._get_all(f"{self.project_path}/labels")
