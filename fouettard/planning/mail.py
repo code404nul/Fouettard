@@ -137,10 +137,13 @@ def classify(message: MailMessage, rules: MailRules, due_on: date | None = None)
             return A_TRAITER
         return A_SAVOIR
     if (message.bulk or _domain_matches(message.sender, rules.noise_domains)
-            or _NOREPLY.match(message.sender) or _contains(whole, rules.noise_keywords)):
+            or _contains(whole, rules.noise_keywords)):
         return BRUIT
-    # Un inconnu ne passe « à traiter » que s'il le dit dans le sujet
-    return A_TRAITER if _contains(subject, rules.action_keywords) else A_SAVOIR
+    # Un inconnu ne passe « à traiter » que s'il le dit dans le sujet, même en no-reply
+    # (un mandat à signer vient souvent d'une adresse automatique)
+    if _contains(subject, rules.action_keywords):
+        return A_TRAITER
+    return BRUIT if _NOREPLY.match(message.sender) else A_SAVOIR
 
 
 def is_urgent(message: MailMessage, rules: MailRules, due_on: date | None) -> bool:

@@ -103,6 +103,9 @@ def test_mailing_list_headers_mark_bulk():
     (make("Offre", sender="x@news.linkedin.com"), None, BRUIT),
     (make("Offre", sender="x@shop.fr", bulk=True), None, BRUIT),
     (make("Compte", sender="no-reply@shop.fr"), None, BRUIT),
+    (make("Compte", sender="no-reply@shop.fr", text="Merci de répondre"), None, BRUIT),
+    (make("Dossier à rendre", sender="noreply.banque@shop.fr"), None, A_TRAITER),
+    (make("Dossier à rendre", sender="no-reply@shop.fr", bulk=True), None, BRUIT),
     (make("Notre newsletter", sender="x@shop.fr"), None, BRUIT),
 ])
 def test_classify(message, due, expected):
@@ -382,6 +385,30 @@ def test_mark_handled_and_add_to_plan_with_confirmation(service, monkeypatch):
 
     asyncio.run(service.handle_action("mail_done", done.arg, NOW))
     assert asyncio.run(service.handle_text("mails", NOW)).content == "Aucun mail à traiter."
+
+
+def test_mails_command_shows_to_know_mails_without_closing_them(service, monkeypatch):
+    serve(monkeypatch, received("2", "Rentrée des clubs"))
+    refresh(service)
+    for phrase in ("mails", "voir mes emails"):
+        reply = asyncio.run(service.handle_text(phrase, NOW))
+        assert "Aucun mail à traiter." in reply.content and "Rentrée des clubs" in reply.content
+        assert reply.buttons == []
+    assert "Rentrée des clubs" in brief(service).content  # le brief l'affiche encore, une fois
+    assert asyncio.run(service.handle_text("mails", NOW)).content == "Aucun mail à traiter."
+
+
+def test_mails_command_says_when_the_mailbox_cannot_be_read(service, monkeypatch):
+    serve(monkeypatch, MailError("boîte inaccessible (TimeoutError)"))
+    refresh(service)
+    assert "pas encore réussi" in asyncio.run(service.handle_text("mails", NOW)).content
+    serve(monkeypatch, received("1", "TD à rendre"))
+    refresh(service, NOW + timedelta(hours=1))
+    assert "injoignable" not in asyncio.run(service.handle_text("mails", NOW + timedelta(hours=1))).content
+    serve(monkeypatch, MailError("boîte inaccessible (TimeoutError)"))
+    refresh(service, NOW + timedelta(hours=2))
+    content = asyncio.run(service.handle_text("mails", NOW + timedelta(hours=2))).content
+    assert "injoignable" in content and "TD à rendre" in content
 
 
 def test_outage_keeps_stored_mails_and_is_said_once_a_day(service, monkeypatch, caplog):

@@ -229,25 +229,43 @@ class PlanningService:
             lines += [f"- {self._mail_line(stored)}" for stored in to_handle[:MAX_MAILS_IN_BRIEF]]
             if len(to_handle) > MAX_MAILS_IN_BRIEF:
                 lines.append(f"- et {len(to_handle) - MAX_MAILS_IN_BRIEF} autres (écris « mails »)")
-        to_know = self.store.mails_to_handle(mail.A_SAVOIR, now - timedelta(days=self.config.mail_lookback_days))
-        if to_know:
-            lines += ["", "**Mails à savoir**"]
-            lines += [f"- {self._mail_line(stored)}" for stored in to_know[:MAX_MAILS_IN_BRIEF]]
-            if len(to_know) > MAX_MAILS_IN_BRIEF:
-                lines.append(f"- et {len(to_know) - MAX_MAILS_IN_BRIEF} autres")
-            for stored in to_know:
-                self.store.close_mail(stored.id)
+        to_know = self._mails_to_know(now)
+        lines += self._to_know_lines(to_know)
+        for stored in to_know:
+            self.store.close_mail(stored.id)
+        return lines
+
+    def _mails_to_know(self, now: datetime):
+        return self.store.mails_to_handle(mail.A_SAVOIR, now - timedelta(days=self.config.mail_lookback_days))
+
+    def _to_know_lines(self, to_know) -> list[str]:
+        if not to_know:
+            return []
+        lines = ["", "**Mails à savoir**"]
+        lines += [f"- {self._mail_line(stored)}" for stored in to_know[:MAX_MAILS_IN_BRIEF]]
+        if len(to_know) > MAX_MAILS_IN_BRIEF:
+            lines.append(f"- et {len(to_know) - MAX_MAILS_IN_BRIEF} autres")
         return lines
 
     def list_mails(self, now: datetime) -> Reply:
+        """Les mails « à savoir » sont montrés sans être clos : le brief les affichera encore."""
         if self.config.imap is None:
             return Reply("La lecture des mails n'est pas configurée.")
+        last_ok, last_error = self.store.source_status(MAIL)
+        if last_ok is None:
+            return Reply("⚠️ Je n'ai pas encore réussi à lire ta boîte mail. Réessaie dans un quart d'heure.")
+        lines = []
+        if last_error is not None and last_error > last_ok:
+            lines += ["⚠️ Boîte mail injoignable pour l'instant : cette liste peut être incomplète.", ""]
         to_handle = self._mails_to_handle(now)
+        to_know_lines = self._to_know_lines(self._mails_to_know(now))
         if not to_handle:
-            return Reply("Aucun mail à traiter.")
+            lines.append("Aucun mail à traiter.")
+            return Reply("\n".join(lines + to_know_lines))
         shown = to_handle[:MAX_MAILS_WITH_BUTTONS]
-        lines = ["📧 **Mails à traiter**"]
+        lines.append("📧 **Mails à traiter**")
         lines += [f"{number}. {self._mail_line(stored)}" for number, stored in enumerate(shown, 1)]
+        lines += to_know_lines
         buttons = []
         for number, stored in enumerate(shown, 1):
             buttons.append(ButtonSpec(f"{number} traité", "mail_done", str(stored.id), "success"))

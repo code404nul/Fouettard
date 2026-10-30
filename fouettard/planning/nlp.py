@@ -179,7 +179,7 @@ def understand(message: str, today: date) -> Intent:
     text = normalize(message)
     if text in ("semaine", "voir la semaine", "ma semaine"):
         return Intent(WEEK)
-    if text in ("mail", "mails", "mes mails"):
+    if text in ("mail", "mails", "mes mails", "voir mes mails", "email", "emails", "mes emails", "voir mes emails"):
         return Intent(MAILS)
     if text in ("aide", "help", "?"):
         return Intent(HELP)
