@@ -34,3 +34,4 @@ def test_invalid_time_is_rejected(tmp_path):
     path.write_text('weekly_recap_time: "20h"\n', encoding="utf-8")
     with pytest.raises(ConfigError):
         load_settings(path)
+        

@@ -43,6 +43,23 @@ class WeeklySlot:
     end: time
 
 
+@dataclass(frozen=True)
+class Course:
+    """Module de la maquette (code et libellé exacts), rattaché à une matière de Zeus."""
+
+    code: str
+    name: str
+    subject: str
+    hours: float
+    coef: float | None = None
+    start: date | None = None
+    end: date | None = None
+
+    @property
+    def weight(self) -> float:
+        return self.coef if self.coef is not None else self.hours
+
+
 @dataclass
 class PlanningConfig:
     owner_id: int
@@ -67,6 +84,10 @@ class PlanningConfig:
     j3d_urgent_hours: int = 48
     j3d_stale_days: int = 5
     review_subjects: list[str] = field(default_factory=list)
+    courses: list[Course] = field(default_factory=list)
+    subject_confidence: dict[str, int] = field(default_factory=dict)
+    exam_subjects: dict[str, list[str]] = field(default_factory=dict)
+    exam_advice_days: int = 30
     subject_aliases: dict[str, str] = field(default_factory=dict)
     ignored_subjects: list[str] = field(default_factory=list)
     probable_homework_subjects: list[str] = field(default_factory=list)
@@ -93,6 +114,28 @@ def _naive(text: str) -> time:
 def _weekly_slots(entries: list[dict] | None) -> list[WeeklySlot]:
     return [WeeklySlot(int(entry["weekday"]), _naive(entry["start"]), _naive(entry["end"]))
             for entry in entries or []]
+
+
+def _hours(value) -> float:
+    """« 33:25 » (heures:minutes, comme dans la maquette) ou un nombre."""
+    if isinstance(value, str) and ":" in value:
+        hours, minutes = value.split(":", 1)
+        return int(hours) + int(minutes) / 60
+    return float(value)
+
+
+def _courses(entries: list[dict] | None) -> list[Course]:
+    courses = []
+    for entry in entries or []:
+        try:
+            coef = entry.get("coef")
+            courses.append(Course(str(entry["code"]), str(entry["name"]), str(entry["subject"]),
+                                  _hours(entry.get("hours", 0)),
+                                  float(coef) if coef is not None else None,
+                                  entry.get("start"), entry.get("end")))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ConfigError(f"Cours mal écrit dans planning.yaml : {entry} ({exc})") from exc
+    return courses
 
 
 def _load_imap() -> ImapSettings | None:
@@ -131,6 +174,10 @@ def load_planning_config(path: Path | None = None) -> PlanningConfig | None:
     config.meals = [(_naive(start), _naive(end)) for start, end in content.pop("meals", [])]
     config.fixed_slots = _weekly_slots(content.pop("fixed_slots", None))
     config.protected_slots = _weekly_slots(content.pop("protected_slots", None))
+    config.courses = _courses(content.pop("courses", None))
+    for subject, value in (content.get("subject_confidence") or {}).items():
+        if not (isinstance(value, int) and 1 <= value <= 5):
+            raise ConfigError(f"subject_confidence : {subject} doit être entre 1 et 5.")
     config.awake_deadlines = [AwakeDeadline(entry["date"], entry["name"],
                                             bool(entry.get("report")))
                               for entry in content.pop("awake_deadlines", None) or []]

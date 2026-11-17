@@ -518,3 +518,89 @@ def test_fixed_club_slot_counts_as_car_work_and_asks_progress(env):
     service.mark_done(item.id, at(11, 12, 20))
     assert service.store.minutes_between("voiture", date(2026, 11, 12), date(2026, 11, 12)) == 120
     assert "Voiture AWAKE : tu en es où" in service.build_evening(at(11, 12, 21)).content
+
+
+def test_guessed_task_is_asked_then_added_to_the_todo_list(env):
+    service, _, _ = env
+    now = at(11, 9, 8)
+    reply = run(service.handle_text("Rendre le TP de thermo jeudi", now))
+    assert "Rendre le TP de thermo" in reply.content and "jeudi 12 novembre" in reply.content
+    assert [button.action for button in reply.buttons] == ["task_yes", "task_no"]
+    assert service.store.open_tasks() == []
+    assert "Ajouté" in run(service.handle_action("task_yes", "", now))[0].content
+    assert run(service.handle_action("task_yes", "", now))[0].content == "Plus rien à ajouter."
+
+    run(service.handle_text("appeler la banque", now))
+    assert "rien" in run(service.handle_action("task_no", "", now))[0].content
+    assert [task["title"] for task in service.store.open_tasks()] == ["Rendre le TP de thermo"]
+
+
+def test_todo_list_sorted_and_tasks_can_be_finished(env):
+    service, _, _ = env
+    now = at(11, 9, 8)
+    service.store.add_task("Sans date", None)
+    service.store.add_task("Plus tard", date(2026, 11, 20))
+    task_id = service.store.add_task("Bientôt", date(2026, 11, 10))
+    reply = run(service.handle_text("todo", now))
+    assert reply.content.index("Bientôt") < reply.content.index("Plus tard") < reply.content.index("Sans date")
+    assert "demain" in reply.content
+    assert reply.buttons[0].action == "task_done" and reply.buttons[0].arg == str(task_id)
+    assert "✅ Bientôt" in run(service.handle_action("task_done", str(task_id), now))[0].content
+    assert "déjà faite" in run(service.handle_action("task_done", str(task_id), now))[0].content
+    assert "Bientôt" not in run(service.handle_text("todo", now)).content
+
+
+def test_evening_answer_is_a_project_step_not_a_task(env):
+    service, _, _ = env
+    service.store.set_value("progress_queue", ["j3d"])
+    assert "Noté" in run(service.handle_text("finir le rapport demain", at(11, 9, 21))).content
+    assert service.store.open_tasks() == []
+
+
+CONTROLE = vevent("c", "Controle de cours de maths", "20261123T080000Z", "20261123T090000Z", "A202")
+
+
+def test_revision_advice_names_the_exam_and_the_courses(env):
+    service, feeds, _ = env
+    feeds.set(ZEUS_URL, MATHS, CONTROLE, EXAM)
+    refresh(service, ZEUS, at(11, 17, 7))
+    reply = run(service.handle_text("réviser", at(11, 17, 8)))
+    assert "Controle de cours de maths" in reply.content and "J-6" in reply.content
+    assert "réviser **Mathématiques**" in reply.content
+    assert "Analyse : suites et fonctions" in reply.content  # le plus gros module de maths
+    assert "EXAMEN 2 SUP" in reply.content
+    brief = run(service.build_brief(at(11, 17, 7))).content
+    assert "**Révisions conseillées**" in brief and "Controle de cours de maths" in brief
+
+
+def test_lower_confidence_lowers_the_estimated_memory(env):
+    service, feeds, _ = env
+    feeds.set(ZEUS_URL, MATHS, CONTROLE)
+    refresh(service, ZEUS, at(11, 10, 20))  # le cours du 10/11 crée sa révision
+    refresh(service, ZEUS, at(11, 17, 7))
+    today = date(2026, 11, 17)
+
+    def memory():
+        return service.subject_states(today, service.all_events())["Mathématiques"]
+
+    assert memory().last_contact == date(2026, 11, 10)
+    before = run(service.handle_text("réviser", at(11, 17, 8))).content
+    assert "confiance 3/5" in before
+    assert run(service.handle_text("confiance maths 1", at(11, 17, 8))).content == "🎯 Mathématiques : confiance 1/5."
+    after = run(service.handle_text("réviser", at(11, 17, 8))).content
+    assert "confiance 1/5" in after and after != before
+    assert "Mathématiques : 1/5" in run(service.handle_text("confiance", at(11, 17, 8))).content
+    assert "va de 1" in run(service.handle_text("confiance maths 8", at(11, 17, 8))).content
+    assert "ne connais pas" in run(service.handle_text("confiance cuisine 2", at(11, 17, 8))).content
+
+
+def test_graded_review_counts_as_a_contact(env):
+    service, _, _ = env
+    service.store.log_study("Physique", date(2026, 11, 15), "facile")
+    state = service.subject_states(date(2026, 11, 17), [])["Physique"]
+    assert state.last_contact == date(2026, 11, 15) and state.grades == ("facile",)
+
+
+def test_no_exam_soon(env):
+    service, _, _ = env
+    assert "Aucun contrôle" in run(service.handle_text("réviser", at(11, 9, 8))).content

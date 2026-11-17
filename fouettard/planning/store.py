@@ -59,6 +59,9 @@ CREATE TABLE IF NOT EXISTS mails (
     subject TEXT NOT NULL, received TEXT NOT NULL, category TEXT NOT NULL,
     due_on TEXT, state TEXT NOT NULL DEFAULT 'new'
 );
+CREATE TABLE IF NOT EXISTS study_log (
+    id INTEGER PRIMARY KEY, subject TEXT NOT NULL, day TEXT NOT NULL, grade TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS sent_keys (key TEXT PRIMARY KEY, sent_at TEXT NOT NULL);
 """
@@ -206,6 +209,35 @@ class PlanningStore:
             "SELECT * FROM tasks WHERE done = 0 AND (scheduled_on IS NULL OR scheduled_on <= ?)",
             (day.isoformat(),)).fetchall()
         return [dict(row) for row in rows]
+
+    def last_course_day(self, subject: str, today: date) -> date | None:
+        """Dernier cours de la matière (chaque cours crée une ligne dans reviews)."""
+        row = self._conn.execute(
+            "SELECT MAX(course_date) AS day FROM reviews WHERE subject = ? AND course_date <= ?",
+            (subject, today.isoformat())).fetchone()
+        return date.fromisoformat(row["day"]) if row["day"] else None
+
+    def log_study(self, subject: str, day: date, grade: str) -> None:
+        with self._conn:
+            self._conn.execute("INSERT INTO study_log (subject, day, grade) VALUES (?, ?, ?)",
+                               (subject, day.isoformat(), grade))
+
+    def studies_since(self, subject: str, since: date | None) -> list[tuple[date, str]]:
+        """Révisions notées de la matière depuis cette date (toutes si None), dans l'ordre."""
+        rows = self._conn.execute(
+            "SELECT day, grade FROM study_log WHERE subject = ? AND day >= ? ORDER BY day, id",
+            (subject, since.isoformat() if since else "")).fetchall()
+        return [(date.fromisoformat(row["day"]), row["grade"]) for row in rows]
+
+    def open_tasks(self) -> list[dict]:
+        """Todo list : tâches pas faites, les plus proches d'abord, celles sans date à la fin."""
+        rows = self._conn.execute(
+            "SELECT * FROM tasks WHERE done = 0 ORDER BY due_on IS NULL, due_on, id").fetchall()
+        return [dict(row) for row in rows]
+
+    def get_task(self, task_id: int) -> dict | None:
+        row = self._conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        return dict(row) if row else None
 
     def finish_task(self, task_id: int) -> None:
         with self._conn:

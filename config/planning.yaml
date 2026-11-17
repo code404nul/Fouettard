@@ -39,6 +39,47 @@ subject_aliases:
   maths: Mathématiques
 probable_homework_subjects: [Mathématiques, Physique, Algorithmique, Programmation]
 
+# --- Conseils de révision (courbe de l'oubli) ---
+# Contrôles et partiels pris en compte jusqu'à ce nombre de jours à l'avance
+exam_advice_days: 30
+# Ta confiance de 1 (perdu) à 5 (je maîtrise), 3 par défaut.
+# Sur Discord, « confiance maths 2 » remplace la valeur d'ici.
+subject_confidence:
+  Mathématiques: 3
+  Physique: 3
+  Algorithmique: 3
+  Architecture: 3
+  Electronique: 3
+  Programmation: 3
+  NTS: 3
+  Anglais: 3
+# Titre exact Zeus -> matières. Sans entrée, la matière est lue dans le titre
+# (« Controle de cours de maths » -> Mathématiques), sinon toutes les matières.
+exam_subjects:
+  "EXAMENS SUP": [Programmation, Algorithmique]   # en salles machines : supposé être l'épreuve sur machine
+# Maquette S01 (code et libellé exacts). Le poids d'une matière est la somme des coef
+# de ses modules ; sans coef, le volume horaire. Ajoute « coef: 4 » quand tu les connais.
+# Modules sans matière Zeus (DDRS, CDSF, méthodologie) : laissés de côté.
+courses:
+  - {code: 2627_I_INF_FISE_S01_AG_ACF, name: "Anglais Communication Formel", subject: Anglais, hours: "33:25"}
+  - {code: 2627_I_INF_FISE_S01_PI_ADP, name: "Étude de la grammaire, Conjugaison et écriture spontanée.", subject: Anglais, hours: "33:06"}
+  - {code: 2627_I_INF_FISE_S01_CN_OAC, name: "Outils d'analyse de circuits", subject: Electronique, hours: "40:00"}
+  - {code: 2627_I_INF_FISE_S01_CN_PA_API, name: "Analyse : Primitives et intégrales", subject: Mathématiques, hours: "34:00"}
+  - {code: 2627_I_INF_FISE_S01_CN_PA_ASF, name: "Analyse : suites et fonctions", subject: Mathématiques, hours: "100:45"}
+  - {code: 2627_I_INF_FISE_S01_CN_PA_GEO, name: "Géométrie (du plan et de l'espace)", subject: Mathématiques, hours: "34:15"}
+  - {code: 2627_I_INF_FISE_S01_CN_PA_SEM, name: "Séminaire", subject: Mathématiques, hours: "44:15"}
+  - {code: 2627_I_INF_FISE_S01_CN_PC_APIS, name: "Analyse : primitives, intégrales, suites", subject: Mathématiques, hours: "95:00"}
+  - {code: 2627_I_INF_FISE_S01_CN_PC_DP, name: "Dénombrement et probabilités", subject: Mathématiques, hours: "85:15"}
+  - {code: 2627_I_INF_FISE_S01_CN_PC_OBM, name: "Outils de base mathématiques", subject: Mathématiques, hours: "52:00"}
+  - {code: 2627_I_INF_FISE_S01_CN_PC_MECA, name: "Mécanique du point - Dynamique en référentiel galiléen, cinématique", subject: Physique, hours: "40:30"}
+  - {code: 2627_I_INF_FISE_S01_CN_TAA, name: "Types Algébriques Abstraits", subject: Algorithmique, hours: "32:00"}
+  - {code: 2627_I_INF_FISE_S01_PR_CAML, name: "Caml et récursivité", subject: Algorithmique, hours: "77:00"}
+  - {code: 2627_I_INF_FISE_S01_PR_LIMA, name: "Listes et Matrices", subject: Algorithmique, hours: "55:00"}
+  - {code: 2627_I_INF_FISE_S01_PR_BOOL, name: "Algèbre de Boole", subject: Architecture, hours: "20:30"}
+  - {code: 2627_I_INF_FISE_S01_PR_NUM, name: "Numération", subject: Architecture, hours: "19:30"}
+  - {code: 2627_I_INF_FISE_S01_PR_C, name: "C - Les bases", subject: Programmation, hours: "46:00", start: 2026-11-09, end: 2026-12-18}
+  - {code: 2627_I_INF_FISE_S01_PR_PET, name: "Python et Environnement de Travail", subject: Programmation, hours: "47:00", start: 2026-09-21, end: 2026-10-31}
+
 # --- Zeus ---
 # Le flux du groupe F1-2 n'a aucun cours parallèle : rien à masquer pour l'instant.
 # Titres exacts à ne pas afficher, si un jour un cours ne te concerne pas :

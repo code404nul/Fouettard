@@ -24,7 +24,7 @@ RDV = "rdv"
 # Clé de exam_distances pour un examen sans matière : il concerne toutes les matières
 ALL_SUBJECTS = "*"
 
-_EXAM_PATTERN = re.compile(r"\b(examen|partiel|controle|qcm|ds)\b")
+_EXAM_PATTERN = re.compile(r"\b(examens?|partiels?|controles?|qcm|ds)\b")
 _MAX_DUPLICATE_GAP = timedelta(minutes=15)
 _TITLE_SIMILARITY = 0.6
 

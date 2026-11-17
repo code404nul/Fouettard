@@ -4,8 +4,8 @@ from datetime import date, datetime, time, timedelta
 
 import pytest
 
-from fouettard.planning import agenda, j3d, nlp, spaced
-from fouettard.planning.config import PlanningConfig, WeeklySlot
+from fouettard.planning import agenda, forgetting, j3d, nlp, spaced
+from fouettard.planning.config import Course, PlanningConfig, WeeklySlot, load_planning_config
 from fouettard.planning.ics import CalEvent
 from fouettard.planning.scheduler import (CLUB_FIXE, DEVOIR, J3D, LEGER, OFF, REVISION, SOIREE,
                                           VOITURE, PlanRequest, ReviewRequest, TaskRequest, build_plan)
@@ -404,3 +404,157 @@ def test_default_estimate_and_time_spent():
 
 def test_milestone_deadline_is_used_when_issue_has_none():
     assert j3d.issue_deadline({"milestone": {"due_date": "2026-12-07"}}) == date(2026, 12, 7)
+
+
+@pytest.mark.parametrize("text, title, due", [
+    ("Rendre le TP de thermo jeudi", "Rendre le TP de thermo", date(2026, 11, 5)),
+    ("il faut que je révise les maths pour le 12/11", "Révise les maths", date(2026, 11, 12)),
+    ("DM de physique pour lundi prochain", "DM de physique", date(2026, 11, 2)),
+    ("Envoyer le mail à Mme Durand avant après-demain", "Envoyer le mail à Mme Durand", date(2026, 11, 1)),
+    ("Payer la cantine d'ici vendredi 6", "Payer la cantine", date(2026, 11, 6)),
+    ("n’oublie pas de signer le mandat", "Signer le mandat", None),
+    ("appeler la banque", "Appeler la banque", None),
+])
+def test_task_is_guessed_with_its_date(text, title, due):
+    intent = nlp.understand(text, TODAY)
+    assert (intent.kind, intent.text) == (nlp.MAYBE_TASK, title)
+    assert (intent.dates.dates[0] if intent.dates else None) == due
+
+
+@pytest.mark.parametrize("text", ["il fait beau", "samedi", "tu fais quoi demain ?", "tous les lundis réviser"])
+def test_no_task_is_guessed(text):
+    assert nlp.understand(text, TODAY).kind == nlp.UNKNOWN
+
+
+@pytest.mark.parametrize("text, kind", [
+    ("semiane", nlp.WEEK), ("agneda", nlp.WEEK), ("Salut ! mes mails stp", nlp.MAILS), ("todoo", nlp.TODO),
+    ("c'est quoi mon edt ?", nlp.WEEK), ("j'ai quoi à faire ?", nlp.TODO), ("plus tard", nlp.POSTPONE),
+    ("comfiance", nlp.CONFIDENCE), ("?", nlp.HELP), ("tu sais faire quoi ?", nlp.HELP),
+    ("réunion la semaine prochaine", nlp.MAYBE_TASK), ("répondre aux mails", nlp.MAYBE_TASK),
+])
+def test_understand_typos_synonyms_and_keywords(text, kind):
+    assert nlp.understand(text, TODAY).kind == kind
+
+
+@pytest.mark.parametrize("text, title", [
+    ("ajoue Réviser thermo pour lundi", "Réviser thermo"),
+    ("tu peux ajouter Payer la cantine à la todo stp", "Payer la cantine"),
+    ("mets Acheter du pain dans la todo", "Acheter du pain"),
+])
+def test_add_task_variants(text, title):
+    intent = nlp.understand(text, TODAY)
+    assert (intent.kind, intent.text) == (nlp.ADD_TASK, title)
+
+
+def test_done_and_postpone_drop_articles():
+    assert nlp.understand("j'ai fini les maths", TODAY).text == "maths"
+    assert nlp.understand("je reporte la révision à demain", TODAY).text == "revision"
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("dans 3 jours", [date(2026, 11, 2)]),
+    ("dans deux semaines", [date(2026, 11, 13)]),
+    ("la semaine prochaine", [date(2026, 11, 2)]),
+    ("ce week-end", [date(2026, 10, 31), date(2026, 11, 1)]),
+    ("fin de semaine", [date(2026, 10, 30)]),
+])
+def test_parse_relative_dates(text, expected):
+    assert list(nlp.parse_dates(text, TODAY).dates) == expected
+
+
+def test_relative_date_is_removed_from_title():
+    intent = nlp.understand("Rendre le DM dans 3 jours", TODAY)
+    assert (intent.text, intent.dates.dates) == ("Rendre le DM", (date(2026, 11, 2),))
+
+
+def test_help_topics_and_suggestion():
+    assert nlp.understand("aide todo", TODAY).text == "todo"
+    assert nlp.understand("aide sur les dattes", TODAY).text == "dates"
+    assert nlp.closest_command("agnd") == "agenda"
+    assert nlp.closest_command("il fait beau") is None
+
+
+def test_todo_command():
+    assert nlp.understand("Todo", TODAY).kind == nlp.TODO
+    assert nlp.understand("mes tâches", TODAY).kind == nlp.TODO
+
+
+# --- Courbe de l'oubli --------------------------------------------------------
+
+def test_low_confidence_forgets_faster_and_reviews_slow_forgetting():
+    assert forgetting.stability(1) < forgetting.stability(3) < forgetting.stability(5)
+    assert forgetting.stability(2, (spaced.FACILE, spaced.MOYEN)) > forgetting.stability(2)
+    assert forgetting.retention(0, 4) == 1
+    assert forgetting.retention(4, 4) == pytest.approx(0.368, abs=0.001)
+    # Un cours compris ne s'oublie jamais entièrement, et moins si on est confiant
+    assert forgetting.memory(3, (), 365) == pytest.approx(0.40)
+    assert forgetting.memory(1, (), 10) < forgetting.memory(3, (), 10) < forgetting.memory(5, (), 10)
+
+
+def test_weights_follow_hours_or_coef_softened():
+    courses = [Course("A", "Analyse", "Mathématiques", 400), Course("M", "Méca", "Physique", 100),
+               Course("C", "C", "Programmation", 10, coef=400)]
+    weights = forgetting.subject_weights(courses)
+    assert weights["Mathématiques"] == weights["Programmation"] == 1
+    assert weights["Physique"] == pytest.approx(0.5)
+
+
+def test_hours_are_read_like_the_curriculum(tmp_path, monkeypatch):
+    monkeypatch.setenv("PLANNING_OWNER_ID", "1")
+    path = tmp_path / "planning.yaml"
+    path.write_text('courses:\n  - {code: X, name: "C - Les bases", subject: Programmation, '
+                    'hours: "46:30", start: 2026-11-09}\n', encoding="utf-8")
+    course = load_planning_config(path).courses[0]
+    assert (course.hours, course.start, course.coef) == (46.5, date(2026, 11, 9), None)
+
+
+def test_exams_are_grouped_and_matched_to_subjects():
+    config = PlanningConfig(owner_id=1, urls={}, database_path=":memory:",
+                            subject_aliases={"maths": "Mathématiques"},
+                            exam_subjects={"EXAMENS SUP": ["Programmation"]})
+    events = [make_event("Controle de cours de maths", at(11, 23, 9), at(11, 23, 10)),
+              make_event("EXAMEN 2 SUP", at(12, 14, 8), at(12, 14, 18)),
+              make_event("EXAMEN 2 SUP", at(12, 15, 8), at(12, 15, 18)),
+              make_event("EXAMENS SUP", at(12, 16, 8), at(12, 16, 18)),
+              make_event("RATTRAPAGES S1", at(12, 1, 8), at(12, 1, 18)),
+              make_event("EXAMEN 3 SUP", at(3, 15, 8, year=2027), at(3, 15, 18, year=2027))]
+    exams = forgetting.upcoming_exams(events, date(2026, 11, 17), 30, config)
+    assert [(exam.title, exam.day, exam.subjects) for exam in exams] == [
+        ("Controle de cours de maths", date(2026, 11, 23), ("Mathématiques",)),
+        ("EXAMEN 2 SUP", date(2026, 12, 14), None),
+        ("EXAMENS SUP", date(2026, 12, 16), ("Programmation",))]
+
+
+def test_advice_favours_heavy_forgotten_low_confidence_subjects():
+    today = date(2026, 11, 17)
+    states = {"Maths": forgetting.SubjectState("Maths", 2, date(2026, 11, 10)),
+              "Physique": forgetting.SubjectState("Physique", 5, date(2026, 11, 16)),
+              "NTS": forgetting.SubjectState("NTS", 3, None)}
+    exam = forgetting.UpcomingExam("EXAMEN 2 SUP", date(2026, 12, 14), None)
+    found = forgetting.exam_advice(exam, states, today, {"Maths": 1, "Physique": 1, "NTS": 0.2}, [])
+    assert [advice.subject for advice in found] == ["Maths", "Physique", "NTS"]
+    # Plus l'examen est proche, plus c'est urgent
+    near = forgetting.advise(states["Maths"], date(2026, 11, 20), today, 1)
+    far = forgetting.advise(states["Maths"], date(2026, 12, 14), today, 1)
+    assert near.score > far.score
+
+
+def test_only_started_courses_are_suggested_biggest_first():
+    courses = [Course("1", "Python", "Programmation", 47), Course("2", "C - Les bases", "Programmation", 46,
+                                                                   start=date(2026, 11, 9)),
+               Course("3", "Futur", "Programmation", 90, start=date(2027, 1, 4))]
+    assert forgetting.courses_to_review(courses, "Programmation", date(2026, 11, 17)) == (
+        "Python", "C - Les bases")
+
+
+@pytest.mark.parametrize("text, subject, number", [
+    ("confiance", "", None), ("confiance maths 2", "maths", 2), ("Confiance en physique 4/5", "physique", 4),
+    ("confiance algorithmique : 1", "algorithmique", 1)])
+def test_confidence_command(text, subject, number):
+    intent = nlp.understand(text, TODAY)
+    assert (intent.kind, intent.text, intent.number) == (nlp.CONFIDENCE, subject, number)
+
+
+def test_revise_command_is_not_a_task():
+    assert nlp.understand("quoi réviser ?", TODAY).kind == nlp.REVISE
+    assert nlp.understand("réviser", TODAY).kind == nlp.REVISE

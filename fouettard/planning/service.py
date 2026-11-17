@@ -6,6 +6,7 @@ ce qui permet de le tester entièrement avec un faux GitLab.
 
 import asyncio
 import logging
+import re
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, time, timedelta
 
@@ -13,7 +14,7 @@ import httpx
 
 from fouettard.gitlab_api import GitLabClient, GitLabError
 from fouettard.logic.key_dates import KeyDate
-from fouettard.planning import agenda, j3d, mail, messages as msg, nlp, spaced
+from fouettard.planning import agenda, forgetting, j3d, mail, messages as msg, nlp, spaced
 from fouettard.planning.config import AwakeDeadline, MAIL, OUTLOOK, ZEUS, PlanningConfig, WeeklySlot
 from fouettard.planning.ics import CalEvent, IcsError, fetch_ics, parse_ics
 from fouettard.planning.scheduler import (CLUB_FIXE, DOMOTIQUE, J3D, LEGER, NORMAL, OFF,
@@ -30,6 +31,8 @@ COLLISION_HORIZON_DAYS = 45
 MAIL_RETENTION_DAYS = 60  # au-delà, le mail est effacé de la base
 MAX_MAILS_IN_BRIEF = 5
 MAX_MAILS_WITH_BUTTONS = 10
+MAX_TASKS_WITH_BUTTONS = 20
+MAX_EXAMS_IN_BRIEF = 3
 DEFAULT_EVENT_MINUTES = 30
 PROJECTS_WITH_TIME = {J3D, VOITURE, DOMOTIQUE, CLUB_FIXE}
 
@@ -462,6 +465,9 @@ class PlanningService:
         lines += ["", "**École**"] + ([f"- {msg.block_line(block)}" for block in school]
                                       or ["- Rien à placer."])
         lines += self._j3d_attention(view, now)
+        advice = self.revision_advice_lines(today, events)
+        if advice:
+            lines += ["", "**Révisions conseillées**"] + [f"- {line}" for line in advice]
 
         title = {CHARGE: "Club (semaine chargée, mode minimum)",
                  CALME: "Club (semaine calme, objectif augmenté)"}.get(mode, "Club")
@@ -487,7 +493,111 @@ class PlanningService:
         buttons = list(BRIEF_BUTTONS)
         if self.config.imap and self._mails_to_handle(now):
             buttons.append(ButtonSpec("Mails", "mails", style="primary"))
+        if self.store.open_tasks():
+            buttons.append(ButtonSpec("Todo", "todo"))
         return Reply("\n".join(lines), buttons)
+
+    # --- Conseils de révision (courbe de l'oubli) -----------------------------
+
+    def known_subjects(self) -> list[str]:
+        subjects = list(self.config.review_subjects)
+        for subject in [course.subject for course in self.config.courses] + list(
+                self.config.subject_confidence):
+            if subject not in subjects:
+                subjects.append(subject)
+        return subjects
+
+    def find_subject(self, text: str) -> str | None:
+        """Matière citée dans un titre ou un message (« maths », « Anglais ACF »...)."""
+        subject = agenda.subject_of(text, self.config)
+        if subject:
+            return subject
+        words = nlp.normalize(text)
+        for subject in self.known_subjects():
+            if re.search(rf"\b{re.escape(nlp.normalize(subject))}\b", words):
+                return subject
+        return None
+
+    def confidence(self, subject: str) -> int:
+        stored = self.store.get_value("confidence", {})
+        return int(stored.get(subject, self.config.subject_confidence.get(
+            subject, forgetting.DEFAULT_CONFIDENCE)))
+
+    def _last_course(self, subject: str, today: date, events: list[CalEvent]) -> date | None:
+        days = [event.start.date() for event in events
+                if agenda.kind_of(event) == agenda.COURS and event.start.date() <= today
+                and self.find_subject(event.title) == subject]
+        stored = self.store.last_course_day(subject, today)
+        return max(days + ([stored] if stored else []), default=None)
+
+    def subject_states(self, today: date,
+                       events: list[CalEvent]) -> dict[str, forgetting.SubjectState]:
+        states = {}
+        for subject in self.known_subjects():
+            course = self._last_course(subject, today, events)
+            studies = self.store.studies_since(subject, course)
+            contacts = [day for day in [course] + [day for day, _ in studies] if day]
+            states[subject] = forgetting.SubjectState(
+                subject, self.confidence(subject), max(contacts, default=None),
+                tuple(grade for _, grade in studies))
+        return states
+
+    def revision_advice_lines(self, today: date, events: list[CalEvent]) -> list[str]:
+        exams = forgetting.upcoming_exams(events, today, self.config.exam_advice_days, self.config)
+        if not exams:
+            return []
+        states = self.subject_states(today, events)
+        weights = forgetting.subject_weights(self.config.courses)
+        lines = []
+        for exam in exams[:MAX_EXAMS_IN_BRIEF]:
+            found = forgetting.exam_advice(exam, states, today, weights, self.config.courses)
+            when = f"{msg.short_day(exam.day)} ({msg.countdown(exam.day, today)})"
+            if exam.subjects and len(found) == 1:
+                advice = found[0]
+                line = (f"📝 **{exam.title}**, {when} : ça serait bien de réviser **{advice.subject}** "
+                        f"(confiance {advice.confidence}/5, mémoire estimée "
+                        f"{advice.retention_exam:.0%} le jour J si tu ne revois rien).")
+                if advice.courses:
+                    line += " Commence par : " + " ; ".join(advice.courses) + "."
+            else:
+                parts = [f"**{advice.subject}** ({advice.confidence}/5, "
+                         f"mémoire {advice.retention_exam:.0%})" for advice in found]
+                line = f"📝 **{exam.title}**, {when} : à revoir en priorité " + ", ".join(parts) + "."
+            lines.append(line)
+        return lines
+
+    def revise_reply(self, today: date) -> Reply:
+        lines = self.revision_advice_lines(today, self.all_events())
+        if not lines:
+            return Reply(f"Aucun contrôle ni partiel dans les {self.config.exam_advice_days} "
+                         "prochains jours.")
+        return Reply("\n".join(["📚 **Quoi réviser**"] + [f"- {line}" for line in lines]
+                               + ["", "*Mémoire estimée avec la courbe de l'oubli et ta confiance. "
+                                  "Change-la avec « confiance maths 2 ».*"]))
+
+    def confidence_reply(self, intent: nlp.Intent, today: date) -> Reply:
+        if intent.number is None and not intent.text:
+            lines = ["🎯 **Confiance par matière** (sur 5)"]
+            for subject, state in self.subject_states(today, self.all_events()).items():
+                days = (today - state.last_contact).days if state.last_contact else None
+                memory = forgetting.memory(state.confidence, state.grades,
+                                           forgetting.UNKNOWN_DAYS if days is None else days)
+                seen = f", vue il y a {days} j" if days is not None else ""
+                lines.append(f"- {subject} : {state.confidence}/5 (mémoire {memory:.0%}{seen})")
+            lines += ["", "Pour changer : « confiance maths 2 »."]
+            return Reply("\n".join(lines))
+        subject = self.find_subject(intent.text)
+        if subject is None:
+            return Reply("Je ne connais pas cette matière. Matières : "
+                         f"{', '.join(self.known_subjects())}.")
+        if intent.number is None:
+            return Reply(f"{subject} : confiance {self.confidence(subject)}/5.")
+        if not 1 <= intent.number <= 5:
+            return Reply("La confiance va de 1 (je suis perdu) à 5 (je maîtrise).")
+        stored = self.store.get_value("confidence", {})
+        stored[subject] = int(intent.number)
+        self.store.set_value("confidence", stored)
+        return Reply(f"🎯 {subject} : confiance {int(intent.number)}/5.")
 
     def _j3d_attention(self, view: GitLabView, now: datetime) -> list[str]:
         lines = [f"- MR à relire : {mr['title']}" for mr in view.merge_requests]
@@ -636,14 +746,15 @@ class PlanningService:
         intent = nlp.understand(text, today)
         queue = self.store.get_value("progress_queue", [])
 
-        if intent.kind == nlp.UNKNOWN and queue:
+        # Le soir, une réponse libre est la prochaine étape du projet, pas une tâche
+        if intent.kind in (nlp.UNKNOWN, nlp.MAYBE_TASK) and queue:
             return self._answer_progress_queue(text.strip(), queue, today)
         if intent.kind == nlp.WEEK:
             return await self.build_week(now)
         if intent.kind == nlp.MAILS:
             return self.list_mails(now)
         if intent.kind == nlp.HELP:
-            return Reply(msg.HELP_TEXT)
+            return Reply(msg.help_text(intent.text))
         if intent.kind == nlp.DONE:
             return self._mark_by_text(intent.text, today, now, done=True)
         if intent.kind == nlp.POSTPONE:
@@ -652,6 +763,14 @@ class PlanningService:
             return self._record_progress(intent, queue, today)
         if intent.kind == nlp.ADD_TASK:
             return self._add_task(intent)
+        if intent.kind == nlp.MAYBE_TASK:
+            return self._ask_task(intent)
+        if intent.kind == nlp.TODO:
+            return self.list_todo(today)
+        if intent.kind == nlp.REVISE:
+            return self.revise_reply(today)
+        if intent.kind == nlp.CONFIDENCE:
+            return self.confidence_reply(intent, today)
         if intent.kind == nlp.ADD_EVENT:
             return self._add_event(intent)
         if intent.kind == nlp.LIGHT:
@@ -668,7 +787,7 @@ class PlanningService:
             return self._add_club_slot(intent)
         if intent.kind == nlp.REMOVE_CLUB_SLOT:
             return self._remove_club_slot(int(intent.number))
-        return Reply("Je n'ai pas compris. C'est pour un jour léger ? Sinon, écris « aide ».",
+        return Reply(msg.unknown_text(nlp.closest_command(text)),
                      self._light_date_buttons(LEGER))
 
     def _answer_progress_queue(self, text: str, queue: list[str], today: date) -> Reply:
@@ -700,6 +819,53 @@ class PlanningService:
         self.store.add_task(intent.text, due)
         when = f" pour {msg.day_name(due)}" if due else " (sans échéance)"
         return Reply(f"📝 Ajouté : « {intent.text} »{when}.")
+
+    def _ask_task(self, intent: nlp.Intent) -> Reply:
+        """Tâche devinée dans un message libre : on demande toujours avant de l'ajouter."""
+        due = intent.dates.dates[0] if intent.dates and intent.dates.dates else None
+        self.store.set_value("pending_task", {"title": intent.text, "due": due.isoformat() if due else None})
+        when = f" pour **{msg.day_name(due)}**" if due else " (sans échéance)"
+        return Reply(f"📝 Je l'ajoute à ta todo list ? « {intent.text} »{when}",
+                     [ButtonSpec("Oui", "task_yes", style="success"),
+                      ButtonSpec("Non", "task_no", style="danger")])
+
+    def confirm_task(self, accepted: bool) -> Reply:
+        pending = self.store.get_value("pending_task")
+        self.store.delete_value("pending_task")
+        if not pending:
+            return Reply("Plus rien à ajouter.")
+        if not accepted:
+            return Reply("D'accord, je n'ajoute rien.")
+        due = date.fromisoformat(pending["due"]) if pending["due"] else None
+        self.store.add_task(pending["title"], due)
+        when = f" pour {msg.day_name(due)}" if due else " (sans échéance)"
+        return Reply(f"📝 Ajouté : « {pending['title']} »{when}.")
+
+    def list_todo(self, today: date) -> Reply:
+        tasks = self.store.open_tasks()
+        if not tasks:
+            return Reply("Ta todo list est vide. Écris par exemple « rendre le TP de thermo jeudi ».")
+        shown = tasks[:MAX_TASKS_WITH_BUTTONS]
+        lines = ["📋 **Todo list**"]
+        for number, task in enumerate(shown, 1):
+            due = date.fromisoformat(task["due_on"]) if task["due_on"] else None
+            when = f" — {msg.short_day(due)} ({msg.countdown(due, today)})" if due else ""
+            lines.append(f"{number}. {task['title']}{when}")
+        if len(tasks) > len(shown):
+            lines.append(f"… et {len(tasks) - len(shown)} autres")
+        return Reply("\n".join(lines), [ButtonSpec(f"{number} fait", "task_done", str(task["id"]), "success")
+                                        for number, task in enumerate(shown, 1)])
+
+    def finish_task(self, task_id: int, today: date) -> Reply:
+        task = self.store.get_task(task_id)
+        if task is None or task["done"]:
+            return Reply("Cette tâche est déjà faite.")
+        self.store.finish_task(task_id)
+        # Si elle était au planning du jour, son créneau est fait aussi
+        for item in self._pending(today):
+            if item.block.ref == f"task:{task_id}":
+                self.store.set_item_state(item.id, DONE)
+        return Reply(f"✅ {task['title']}")
 
     def _add_event(self, intent: nlp.Intent) -> Reply:
         if not (intent.dates and intent.dates.dates and intent.moment):
@@ -801,6 +967,7 @@ class PlanningService:
         distances = agenda.exam_distances(self.all_events(), today, self.config.exam_boost_days,
                                           self.config)
         next_due = None
+        subjects = set()
         for review_id in self._review_ids(item):
             review = self.store.get_review(review_id)
             if review is None:
@@ -808,8 +975,11 @@ class PlanningService:
             updated = spaced.after_grade(review, grade, today,
                                          spaced.exam_days_for(review.subject, distances))
             self.store.update_review(updated)
+            subjects.add(review.subject)
             if updated.active:
                 next_due = min(next_due or updated.due_on, updated.due_on)
+        for subject in subjects:
+            self.store.log_study(subject, today, grade)
         self.store.mark_sent(key, now)
         follow = f" Prochaine révision : {msg.day_name(next_due)}." if next_due else " Cette matière est à jour."
         return Reply(f"📈 Noté « {grade} ».{follow}")
@@ -932,6 +1102,14 @@ class PlanningService:
             return [self.close_mail(int(arg), add_to_plan=False)]
         if action == "mail_add":
             return [self.close_mail(int(arg), add_to_plan=True)]
+        if action == "task_yes":
+            return [self.confirm_task(True)]
+        if action == "task_no":
+            return [self.confirm_task(False)]
+        if action == "task_done":
+            return [self.finish_task(int(arg), today)]
+        if action == "todo":
+            return [self.list_todo(today)]
         if action == "done":
             return [self.mark_done(int(arg), now)]
         if action == "postpone":
